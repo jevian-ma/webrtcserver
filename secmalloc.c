@@ -1,7 +1,3 @@
-#include "secmalloc.h"
-
-#ifdef DEBUG
-
 #include <malloc.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -26,5 +22,3 @@ void secfree(void *p) {
 void showmalloctime() {
     printf("malloctime:%d\n", malloctime);
 }
-
-#endif
