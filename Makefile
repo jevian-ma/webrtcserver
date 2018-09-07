@@ -1,17 +1,18 @@
-CC = gcc
-FLAGS = -lmicrohttpd -ljansson `pkg-config --cflags --libs nice`
 
-webrtcserver: main.o httpd.o secmalloc.o
-	$(CC) -o $@ $^ $(FLAGS)
+webrtcserver: main.o httpd.o secmalloc.o ice.o
+	gcc -o $@ $^ -lmicrohttpd -ljansson `pkg-config --cflags --libs nice`
 
-main.o: main.c httpd.h
-	$(CC) -c -o $@ main.c
+main.o: main.c httpd.h ice.h
+	gcc -c -o $@ main.c `pkg-config --cflags --libs nice`
 
 httpd.o: httpd.c httpd.h secmalloc.h main.h
-	$(CC) -c -o $@ httpd.c
+	gcc -c -o $@ httpd.c
 
 secmalloc.o: secmalloc.c secmalloc.h
-	$(CC) -c -o $@ secmalloc.c
+	gcc -c -o $@ secmalloc.c
+
+ice.o: ice.c ice.h secmalloc.h
+	gcc -c -o $@ ice.c `pkg-config --cflags --libs nice`
 
 clean:
 	rm *.o

@@ -5,7 +5,7 @@
 #include "httpd.h"
 #include "main.h"
 
-int ahc_echo(void *cls,
+int connectionHandler(void *cls,
             struct MHD_Connection * connection,
             const char * url,
             const char * method,
@@ -37,7 +37,7 @@ int ahc_echo(void *cls,
 }
 
 int starthttpd(uint16_t port) {
-    struct MHD_Daemon *d = MHD_start_daemon(MHD_USE_EPOLL_INTERNALLY, port, NULL, NULL, &ahc_echo, NULL, MHD_OPTION_END);
+    struct MHD_Daemon *d = MHD_start_daemon(MHD_USE_EPOLL_INTERNALLY, port, NULL, NULL, connectionHandler, NULL, MHD_OPTION_END);
     if (d == NULL) {
         return -1;
     }

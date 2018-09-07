@@ -2,6 +2,7 @@
 #include <string.h>
 #include <jansson.h>
 #include "httpd.h"
+#include "ice.h"
 
 void handlerequeset (const char *url, const char *json, char *res) {
     json_error_t err;
@@ -10,13 +11,18 @@ void handlerequeset (const char *url, const char *json, char *res) {
         strcpy(res, "{\"errcode\":-1,\"errmsg\":\"json parse fail!!!\"}");
         return;
     }
-    json_t *jevianobj = json_object_get (obj, "jevian");
-    const char *jevian = json_string_value(jevianobj);
-    strcpy (res, jevian);
+    json_t *actobj = json_object_get (obj, "act");
+    const char *act = json_string_value(actobj);
+    if (strcmp(act, "createroom") == 0) {
+        createicd (NULL);
+    } else if (strcmp(act, "enterroom") == 0) {
+        ;
+    }
     json_decref (obj);
 }
 
 int main(int argc, char *argv[]) {
+    networkinginit();
     starthttpd(80);
     getchar();
 }
