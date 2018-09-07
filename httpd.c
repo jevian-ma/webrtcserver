@@ -1,7 +1,9 @@
+#include <stdio.h>
 #include <microhttpd.h>
 #include <string.h>
 #include "secmalloc.h"
 #include "httpd.h"
+#include "main.h"
 
 int ahc_echo(void *cls,
             struct MHD_Connection * connection,
@@ -11,22 +13,20 @@ int ahc_echo(void *cls,
             const char * upload_data,
             size_t *upload_data_size,
             void ** ptr) {
-    char *buff = *ptr;
-    if (buff == NULL) {
-        buff = (char*)secmalloc(4096);
-        buff[0] = '\0';
-        *ptr = buff;
+    char *html = *ptr;
+    if (html == NULL) {
+        if((html = (char*)secmalloc(4096)) == NULL) {
+            printf("malloc fail!!!, in %s, at %d\n", __FILE__, __LINE__);
+            return MHD_NO;
+        }
+        *ptr = html;
         return MHD_YES;
     }
     if (*upload_data_size != 0) {
         *upload_data_size = 0;
-        strcat(buff, upload_data);
+        handlerequeset (url, upload_data, html);
         return MHD_YES;
     }
-    char *html = (char*)secmalloc(4096);
-    CallBackHttpdRequest *cbhr = cls;
-    (*cbhr)(url, buff, html);
-    secfree(buff);
     struct MHD_Response *response = MHD_create_response_from_buffer(strlen(html), (void*) html, MHD_RESPMEM_PERSISTENT);
     MHD_add_response_header(response, "Content-Type", "text/plain");
     MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
@@ -36,8 +36,8 @@ int ahc_echo(void *cls,
     return ret;
 }
 
-int starthttpd(uint16_t port, CallBackHttpdRequest cbhr) {
-    struct MHD_Daemon *d = MHD_start_daemon(MHD_USE_EPOLL_INTERNALLY, port, NULL, NULL, &ahc_echo, &cbhr, MHD_OPTION_END);
+int starthttpd(uint16_t port) {
+    struct MHD_Daemon *d = MHD_start_daemon(MHD_USE_EPOLL_INTERNALLY, port, NULL, NULL, &ahc_echo, NULL, MHD_OPTION_END);
     if (d == NULL) {
         return -1;
     }

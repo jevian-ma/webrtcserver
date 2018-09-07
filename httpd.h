@@ -3,7 +3,6 @@
 
 #include "stdint.h"
 
-typedef void (*CallBackHttpdRequest) (const char *url, const char *json, char *str);
-int starthttpd(uint16_t port, CallBackHttpdRequest cbhr);
+int starthttpd(uint16_t port);
 
 #endif

@@ -7,7 +7,7 @@ webrtcserver: main.o httpd.o secmalloc.o
 main.o: main.c httpd.h
 	$(CC) -c -o $@ main.c
 
-httpd.o: httpd.c httpd.h secmalloc.h
+httpd.o: httpd.c httpd.h secmalloc.h main.h
 	$(CC) -c -o $@ httpd.c
 
 secmalloc.o: secmalloc.c secmalloc.h
