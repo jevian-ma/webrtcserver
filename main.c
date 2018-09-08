@@ -14,8 +14,7 @@ void handlerequeset (const char *url, const char *json, char *res) {
     json_t *actobj = json_object_get (obj, "act");
     const char *act = json_string_value(actobj);
     if (strcmp(act, "createroom") == 0) {
-        createicd (obj);
-        strcpy(res, "{\"errcode\":0,\"errmsg\":\"success\"}");
+        createicd (obj, res);
     } else if (strcmp(act, "enterroom") == 0) {
         ;
     }

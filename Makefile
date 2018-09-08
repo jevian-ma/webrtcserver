@@ -5,7 +5,7 @@ webrtcserver: main.o httpd.o secmalloc.o ice.o
 main.o: main.c httpd.h ice.h
 	gcc -c -o $@ main.c
 
-httpd.o: httpd.c httpd.h secmalloc.h main.h
+httpd.o: httpd.c httpd.h main.h
 	gcc -c -o $@ httpd.c
 
 secmalloc.o: secmalloc.c secmalloc.h

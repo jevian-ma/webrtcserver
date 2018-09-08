@@ -1,9 +1,14 @@
 #include <agent.h>
 #include <gio/gnetworking.h>
+#include <arpa/inet.h>
+#include <netdb.h>
 #include <stdint.h>
 #include <pthread.h>
 #include <jansson.h>
+#include <semaphore.h>
 #include "secmalloc.h"
+
+const gchar *candidate_type_name[] = {"host", "srflx", "prflx", "relay"};
 
 pthread_mutex_t ice_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -18,7 +23,13 @@ struct TURNLIST {
 struct ICESERVERS {
     char *stun_server;
     uint16_t stun_port;
-    struct TURNLIST* turnlist;
+    struct TURNLIST *turnlist;
+};
+
+struct THREADARGS {
+    struct ICESERVERS *iceservers;
+    sem_t sem;
+    char *json;
 };
 
 struct ICELIST {
@@ -26,6 +37,7 @@ struct ICELIST {
     size_t connectid;
     GMainLoop *gloop;
     NiceAgent *agent;
+    struct THREADARGS *threadargs;
     struct ICELIST *tail;
 };
 struct ICELIST *icelist = NULL;
@@ -36,7 +48,57 @@ void networkinginit () {
     g_networking_init();
 }
 
-void cb_candidate_gathering_done (NiceAgent *agent, guint _stream_id, gpointer data) {
+void cb_candidate_gathering_done (NiceAgent *agent, guint stream_id, gpointer data) {
+    gchar *local_ufrag = NULL;
+    gchar *local_pwd = NULL;
+    if (!nice_agent_get_local_credentials(agent, stream_id, &local_ufrag, &local_pwd)) {
+        printf("get local credentials fail, in %s, at %d\n", __FILE__, __LINE__);
+        goto end;
+    }
+    json_t *obj = json_object();
+    json_object_set_new(obj, "ufrag", json_string(local_ufrag));
+    json_object_set_new(obj, "pwd", json_string(local_pwd));
+    json_t *arr = json_array();
+    GSList *cands = nice_agent_get_local_candidates(agent, stream_id, 1);
+    if (cands == NULL) {
+        printf("get local candidates fail, in %s, at %d\n", __FILE__, __LINE__);
+        goto end;
+    }
+    GSList *item = cands;
+    while (item != NULL) {
+        gchar ipaddr[INET6_ADDRSTRLEN];
+        NiceCandidate *c = (NiceCandidate *)item->data;
+        nice_address_to_string(&c->addr, ipaddr);
+        json_t *tmp = json_object();
+        json_object_set_new(tmp, "foundation", json_string(c->foundation));
+        json_object_set_new(tmp, "priority", json_integer(c->priority));
+        json_object_set_new(tmp, "ipaddr", json_string(ipaddr));
+        json_object_set_new(tmp, "port", json_integer(nice_address_get_port(&c->addr)));
+        json_object_set_new(tmp, "type", json_string(candidate_type_name[c->type]));
+        json_array_append_new(arr, tmp);
+        item = item->next;
+    }
+    json_object_set_new(obj, "track", arr);
+    struct ICELIST *p = icelist;
+    while (p != NULL) {
+        if (p->agent == agent) {
+            break;
+        }
+        p = p->tail;
+    }
+    p->threadargs->json = json_dumps(obj, JSON_COMPACT); // JSON_ESCAPE_SLASH这个flag以后可能会有用，将对象中的"/"替换成"\/"再输出
+    json_decref (obj);
+    sem_post(&p->threadargs->sem);
+end:
+    if (local_ufrag) {
+        g_free(local_ufrag);
+    }
+    if (local_pwd) {
+        g_free(local_pwd);
+    }
+    if (cands) {
+        g_slist_free_full(cands, (GDestroyNotify)&nice_candidate_free);
+    }
 }
 
 void cb_new_selected_pair (NiceAgent *agent, guint _stream_id, guint component_id, gchar *lfoundation, gchar *rfoundation, gpointer data) {
@@ -49,7 +111,8 @@ void cb_nice_recv () {
 }
 
 void *createicd_thread (void *args) {
-    struct ICESERVERS *iceservers = args;
+    struct THREADARGS *threadargs = args;
+    struct ICESERVERS *iceservers = threadargs->iceservers;
     GMainLoop *gloop = g_main_loop_new(NULL, FALSE);
     NiceAgent *agent = nice_agent_new(g_main_loop_get_context (gloop), NICE_COMPATIBILITY_RFC5245);
     pthread_mutex_lock(&ice_mutex);
@@ -92,6 +155,7 @@ void *createicd_thread (void *args) {
     }
     ice->gloop = gloop;
     ice->agent = agent;
+    ice->threadargs = threadargs;
     ice->tail = NULL;
     if (icelist == NULL) {
         icelist = ice;
@@ -107,27 +171,22 @@ void *createicd_thread (void *args) {
         g_object_set(agent, "stun-server", iceservers->stun_server, NULL);
         g_object_set(agent, "stun-server-port", iceservers->stun_port, NULL);
     }
-    g_object_set(agent, "upnp", 0, NULL);
-    g_object_set(agent, "controlling-mode", 0, NULL);
     g_signal_connect(agent, "candidate-gathering-done", G_CALLBACK(cb_candidate_gathering_done), NULL);
     g_signal_connect(agent, "new-selected-pair", G_CALLBACK(cb_new_selected_pair), NULL);
     g_signal_connect(agent, "component-state-changed", G_CALLBACK(cb_component_state_changed), NULL);
     guint stream_id = nice_agent_add_stream(agent, 1);
-    if (iceservers != NULL && iceservers->turnlist != NULL) {
-        struct TURNLIST *p = iceservers->turnlist;
-        while (p != NULL) {
-            if (p->turn_server != NULL && p->turn_port != 0 && p->turn_user != NULL && p->turn_pwd != NULL) {
-                nice_agent_set_relay_info(agent, stream_id, 1, p->turn_server, p->turn_port, p->turn_user, p->turn_pwd, NICE_RELAY_TYPE_TURN_UDP);
-            }
-            p = p->tail;
-        }
-    }
     nice_agent_attach_recv(agent, stream_id, 1, g_main_loop_get_context (gloop), cb_nice_recv, NULL);
-    nice_agent_gather_candidates(agent, stream_id);
-    g_main_loop_run (gloop);
-    g_main_loop_unref(gloop);
-    g_object_unref(agent);
     if (iceservers != NULL) {
+        if (iceservers->turnlist != NULL) {
+            struct TURNLIST *p = iceservers->turnlist;
+            while (p != NULL) {
+                if (p->turn_server != NULL && p->turn_port != 0 && p->turn_user != NULL && p->turn_pwd != NULL) {
+                    nice_agent_set_relay_info(agent, stream_id, 1, p->turn_server, p->turn_port, p->turn_user, p->turn_pwd, NICE_RELAY_TYPE_TURN_UDP);
+                }
+                p = p->tail;
+            }
+        }
+        // iceservers使用完毕，开始释放；
         if (iceservers->stun_server != NULL) {
             secfree(iceservers->stun_server);
         }
@@ -147,20 +206,34 @@ void *createicd_thread (void *args) {
             secfree(turn);
         }
         secfree(iceservers);
+        threadargs->iceservers = NULL;
     }
+    if(!nice_agent_gather_candidates(agent, stream_id)) {
+        printf("Failed to start candidate gathering, in %s, at %d\n", __FILE__, __LINE__);
+    }
+    g_main_loop_run (gloop);
+    g_main_loop_unref(gloop);
+    g_object_unref(agent);
 }
 
-void createicd (json_t *obj) {
-    struct ICESERVERS *iceservers;
+void createicd (json_t *obj, char *res) {
+    struct THREADARGS *threadargs = (struct THREADARGS*)secmalloc(sizeof(struct THREADARGS));
     json_t *iceserversobj = json_object_get (obj, "iceservers");
     if (iceserversobj != NULL) {
-        iceservers = (struct ICESERVERS*)secmalloc(sizeof(struct ICESERVERS));
+        struct ICESERVERS *iceservers = (struct ICESERVERS*)secmalloc(sizeof(struct ICESERVERS));
         json_t *stun_serverobj = json_object_get (iceserversobj, "stun_server");
         if (stun_serverobj != NULL) {
             const char *stun_server = json_string_value(stun_serverobj);
-            size_t stun_serverlen = strlen(stun_server);
-            iceservers->stun_server = (char*)secmalloc(stun_serverlen + 1);
-            strcpy(iceservers->stun_server, stun_server);
+            struct hostent *host = gethostbyname(stun_server);
+            if(host->h_addrtype == AF_INET) {
+                iceservers->stun_server = (char*)secmalloc(INET_ADDRSTRLEN);
+                inet_ntop(AF_INET, host->h_addr_list[0], iceservers->stun_server, INET_ADDRSTRLEN);
+            } else if(host->h_addrtype == AF_INET6){
+                iceservers->stun_server = (char*)secmalloc(INET6_ADDRSTRLEN);
+                inet_ntop(AF_INET6, host->h_addr_list[0], iceservers->stun_server, INET6_ADDRSTRLEN);
+            } else {
+                iceservers->stun_server = NULL;
+            }
         } else {
             iceservers->stun_server = NULL;
         }
@@ -181,9 +254,16 @@ void createicd (json_t *obj) {
                 json_t *turn_serverobj = json_object_get (turnobj, "turn_server");
                 if (turn_serverobj != NULL) {
                     const char *turn_server = json_string_value(turn_serverobj);
-                    size_t turn_serverlen = strlen(turn_server);
-                    turn->turn_server = (char*)secmalloc(turn_serverlen + 1);
-                    strcpy(turn->turn_server, turn_server);
+                    struct hostent *host = gethostbyname(turn_server);
+                    if(host->h_addrtype == AF_INET) {
+                        turn->turn_server = (char*)secmalloc(INET_ADDRSTRLEN);
+                        inet_ntop(AF_INET, host->h_addr_list[0], turn->turn_server, INET_ADDRSTRLEN);
+                    } else if(host->h_addrtype == AF_INET6){
+                        turn->turn_server = (char*)secmalloc(INET6_ADDRSTRLEN);
+                        inet_ntop(AF_INET6, host->h_addr_list[0], turn->turn_server, INET6_ADDRSTRLEN);
+                    } else {
+                        turn->turn_server = NULL;
+                    }
                 } else {
                     turn->turn_server = NULL;
                 }
@@ -223,13 +303,24 @@ void createicd (json_t *obj) {
                 }
             }
         }
+        threadargs->iceservers = iceservers;
     } else {
-        iceservers = NULL;
+        threadargs->iceservers = NULL;
     }
+    sem_init(&threadargs->sem, 0, 0);
+    threadargs->json = NULL;
     pthread_t tid;
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    pthread_create(&tid, &attr, createicd_thread, iceservers);
+    pthread_create(&tid, &attr, createicd_thread, threadargs);
     pthread_attr_destroy (&attr);
+    sem_wait(&threadargs->sem);
+    sem_destroy(&threadargs->sem);
+    if (threadargs->json) {
+        strcpy(res, threadargs->json);
+        free(threadargs->json); // 这里使用free而非secfree，因为这个对象是jansson的json_dumps生成的，不是我生成的。
+    } else {
+        strcpy(res, strcpy(res, "{\"errcode\":-2,\"errmsg\":\"get ice fail\"}"));
+    }
 }

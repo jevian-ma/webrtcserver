@@ -2,6 +2,6 @@
 #define __ICE_H__
 
 void networkinginit ();
-void createicd ();
+void createicd (json_t *obj, char *res);
 
 #endif
