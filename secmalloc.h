@@ -3,6 +3,6 @@
 
 void *secmalloc(size_t num);
 void secfree(void *p);
-void showmalloctime();
+void showmalloctime(char *filename, int line);
 
 #endif
