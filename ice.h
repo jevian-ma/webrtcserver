@@ -2,6 +2,7 @@
 #define __ICE_H__
 
 void networkinginit ();
-void createicd (json_t *obj, char *res);
+void createicd ();
+void createliveroom (json_t *obj, char *res);
 
 #endif
