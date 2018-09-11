@@ -27,6 +27,6 @@ void handlerequeset (const char *url, const char *json, char *res) {
 
 int main(int argc, char *argv[]) {
     networkinginit();
-    starthttpd(80);
+    starthttpd();
     createicd();
 }

@@ -69,6 +69,7 @@ void cb_candidate_gathering_done (NiceAgent *agent, guint stream_id, gpointer da
         goto end1;
     }
     stream->res = json_object();
+    json_object_set_new(stream->res, "stream_id", json_integer(stream_id));
     json_object_set_new(stream->res, "iceufrag", json_string(local_ufrag));
     json_object_set_new(stream->res, "icepwd", json_string(local_pwd));
     cands = nice_agent_get_local_candidates(agent, stream_id, 1);
@@ -234,7 +235,28 @@ void createliveroom (json_t *obj, char *res) {
     struct STREAMLIST *stream = room->streamlist;
     while (stream != NULL) {
         nice_agent_attach_recv(agent, stream->id, 1, g_main_loop_get_context (gloop), cb_nice_recv, room);
-        json_t *turn_serversobj = json_object_get (obj, "turn_servers");
+        json_t *iceservers = json_object_get (obj, "iceservers");
+        json_t *stun_serverobj = json_object_get (iceservers, "stun_server");
+        json_t *stun_portobj = json_object_get (iceservers, "stun_port");
+        if(stun_serverobj != NULL && stun_portobj != NULL) {
+            const char *stun_server = json_string_value(stun_serverobj);
+            uint16_t stun_port = json_integer_value(stun_portobj);
+            if (stun_server != NULL && stun_port != 0) {
+                struct hostent *host = gethostbyname(stun_server);
+                if(host->h_addrtype == AF_INET) {
+                    char ipaddr[INET_ADDRSTRLEN];
+                    inet_ntop(AF_INET, host->h_addr_list[0], ipaddr, INET_ADDRSTRLEN);
+                    g_object_set(agent, "stun-server", ipaddr, NULL);
+                    g_object_set(agent, "stun-server-port", stun_port, NULL);
+                } else if(host->h_addrtype == AF_INET6){
+                    char ipaddr[INET6_ADDRSTRLEN];
+                    inet_ntop(AF_INET6, host->h_addr_list[0], ipaddr, INET6_ADDRSTRLEN);
+                    g_object_set(agent, "stun-server", ipaddr, NULL);
+                    g_object_set(agent, "stun-server-port", stun_port, NULL);
+                }
+            }
+        }
+        json_t *turn_serversobj = json_object_get (iceservers, "turn_servers");
         if (turn_serversobj != NULL) {
             size_t length2 = json_array_size(turn_serversobj);
             for (size_t i = 0 ; i < length2 ; i++) {
@@ -271,6 +293,7 @@ void createliveroom (json_t *obj, char *res) {
     sem_wait(&stream1->sem);
     sem_wait(&stream2->sem);
     json_t *resobj = json_object();
+    json_object_set_new(resobj, "errcode", json_integer(0));
     json_object_set_new(resobj, "videoice", stream1->res);
     json_object_set_new(resobj, "audioice", stream2->res);
     char *json = json_dumps(resobj, JSON_COMPACT); // JSON_ESCAPE_SLASH这个flag以后可能会有用，将对象中的"/"替换成"\/"再输出
@@ -295,28 +318,9 @@ void createicd () {
             printf("json error on line %d: %s, in %s, at %d\n", error.line, error.text, __FILE__, __LINE__);           
         }
     }
-    GMainLoop *gloop = g_main_loop_new(NULL, FALSE);
+    gloop = g_main_loop_new(NULL, FALSE);
     agent = nice_agent_new(g_main_loop_get_context (gloop), NICE_COMPATIBILITY_RFC5245);
-    json_t *stun_serverobj = json_object_get (configobj, "stun_server");
-    json_t *stun_portobj = json_object_get (configobj, "stun_port");
-    if(stun_serverobj != NULL && stun_portobj != NULL) {
-        const char *stun_server = json_string_value(stun_serverobj);
-        uint16_t stun_port = json_integer_value(stun_portobj);
-        if (stun_server != NULL && stun_port != 0) {
-            struct hostent *host = gethostbyname(stun_server);
-            if(host->h_addrtype == AF_INET) {
-                char ipaddr[INET_ADDRSTRLEN];
-                inet_ntop(AF_INET, host->h_addr_list[0], ipaddr, INET_ADDRSTRLEN);
-                g_object_set(agent, "stun-server", ipaddr, NULL);
-                g_object_set(agent, "stun-server-port", stun_port, NULL);
-            } else if(host->h_addrtype == AF_INET6){
-                char ipaddr[INET6_ADDRSTRLEN];
-                inet_ntop(AF_INET6, host->h_addr_list[0], ipaddr, INET6_ADDRSTRLEN);
-                g_object_set(agent, "stun-server", ipaddr, NULL);
-                g_object_set(agent, "stun-server-port", stun_port, NULL);
-            }
-        }
-    }
+    json_decref (configobj);
     g_signal_connect(agent, "candidate-gathering-done", G_CALLBACK(cb_candidate_gathering_done), NULL);
     g_signal_connect(agent, "new-selected-pair", G_CALLBACK(cb_new_selected_pair), NULL);
     g_signal_connect(agent, "component-state-changed", G_CALLBACK(cb_component_state_changed), NULL);

@@ -1,11 +1,13 @@
 var WebrtcServer = function () {
-    this.roomid = 0;
-    this.connectid = 0;
     this.pc = null;
-    this.sender = function (url, iceServers, stream) {
+    this.sender = function (url, iceServers, stream, roomid) {
         var _this = this
         return new Promise (function (resolve, reject) {
-            var postdata = {act: 'createroom'}
+            _this.roomid = roomid;
+            var postdata = {
+                act: 'createliveroom',
+                roomid: roomid
+            }
             if (iceServers) {
                 _this.pc = new RTCPeerConnection({iceServers: iceServers})
                 var servers = {}
@@ -34,43 +36,61 @@ var WebrtcServer = function () {
             } else {
                 _this.pc = new RTCPeerConnection()
             }
-            var candidates = []
+            var videocandidates = []
+            var audiocandidates = []
             _this.pc.onicecandidate = function (e) {
                 if (e.candidate) {
-                    console.log(JSON.stringify(e.candidate))
                     var arr = e.candidate.candidate.split(' ')
-                    var candidate = {
-                        priority: Number(arr[3]),
-                        ipaddr: arr[4],
-                        port: Number(arr[5]),
-                        type: arr[7],
-                        sdpMid: e.candidate.sdpMid,
-                        sdpMLineIndex: e.candidate.sdpMLineIndex,
-                        usernameFragment: e.candidate.usernameFragment
+                    if (e.candidate.sdpMid == 'video') {
+                        var candidate = {
+                            priority: Number(arr[3]),
+                            ipaddr: arr[4],
+                            port: Number(arr[5]),
+                            type: arr[7],
+                            sdpMLineIndex: e.candidate.sdpMLineIndex,
+                            usernameFragment: e.candidate.usernameFragment
+                        }
+                        videocandidates.push(candidate)
+                    } else if (e.candidate.sdpMid == 'audio') {
+                        var candidate = {
+                            priority: Number(arr[3]),
+                            ipaddr: arr[4],
+                            port: Number(arr[5]),
+                            type: arr[7],
+                            sdpMLineIndex: e.candidate.sdpMLineIndex,
+                            usernameFragment: e.candidate.usernameFragment
+                        }
+                        audiocandidates.push(candidate)
                     }
-                    candidates.push(candidate)
                 } else {
-                    if (candidates.length != 0) {
-                        postdata.candidates = candidates
+                    if (videocandidates.length != 0) {
+                        postdata.videoice.candidates = videocandidates
+                    }
+                    if (audiocandidates.length != 0) {
+                        postdata.audioice.candidates = audiocandidates
                     }
                     var xhr = new XMLHttpRequest()
                     xhr.open('POST', url)
                     xhr.onload = function () {
                         var json = xhr.responseText
                         var obj = JSON.parse(json)
+                        if (obj.errcode != 0) {
+                            alert ('errcode:' + obj.errcode + '; message:' + obj.errmsg)
+                            return
+                        }
                         var disc = _this.createdisc (obj)
                         _this.pc.setRemoteDescription(disc).catch(function (e) {
                             console.log(e)
                         })
-/*
-
-                        ices = _this.createcandidate (obj)
-                        _this.pc.addIceCandidate(ice).catch(e => {
-                            console.log(e);
-                        })
-*/
-                        _this.roomid = obj.roomid
-                        _this.connectid = obj.connectid
+                        var ices = _this.createcandidate (obj)
+                        for (var i=0,length=ices.length;i<length;i++) {
+                            _this.pc.addIceCandidate(ices[i]).catch(function (e) {
+                                console.log('i=' + i);
+                                console.log(e);
+                            })
+                        }
+                        _this.videostreamid = obj.videoice.stream_id
+                        _this.audiostreamid = obj.audioice.stream_id
                         resolve(json)
                     }
                     var json = JSON.stringify(postdata)
@@ -94,23 +114,56 @@ var WebrtcServer = function () {
                 }
             }
             _this.pc.createOffer({offerToReceiveAudio: true}).then(function (desc) {
-                console.log(desc.sdp)
+                console.log (desc)
                 _this.pc.setLocalDescription(desc).catch(function (e) {
                     console.log(e)
                 })
                 postdata.type = desc.type
+                var nowmsg = ''
+                var audioiceufrag = ''
+                var audioicepwd = ''
+                var videoiceufrag = ''
+                var videoicepwd = ''
+                var audioflagkey = 'm=audio'
+                var videoflagkey = 'm=video'
                 var iceufragkey = 'a=ice-ufrag:'
                 var icepwdkey = 'a=ice-pwd:'
-                var iceufragkeylength = iceufragkey.length
-                var icepwdkeylength = icepwdkey.length
                 var arr = desc.sdp.split('\r\n')
                 for (var i = 0, length = arr.length ; i < length ; i++) {
                     var tmp = arr[i]
-                    if (tmp.substr(0, iceufragkeylength) == iceufragkey) {
-                        postdata.iceufrag = tmp.substr(iceufragkeylength)
-                    } else if (tmp.substr(0, icepwdkeylength) == icepwdkey) {
-                        postdata.icepwd = tmp.substr(icepwdkeylength)
+                    if (tmp.substr(0, audioflagkey.length) == audioflagkey) {
+                        nowmsg = 'audio'
+                    } else if (tmp.substr(0, videoflagkey.length) == videoflagkey) {
+                        nowmsg = 'video'
+                    } else if (tmp.substr(0, iceufragkey.length) == iceufragkey) {
+                        if (nowmsg == 'video') {
+                            if (videoiceufrag == '') {
+                                videoiceufrag = tmp.substr(iceufragkey.length)
+                            }
+                        } else if (nowmsg == 'audio') {
+                            if (audioiceufrag == '') {
+                                audioiceufrag = tmp.substr(iceufragkey.length)
+                            }
+                        }
+                    } else if (tmp.substr(0, icepwdkey.length) == icepwdkey) {
+                        if (nowmsg == 'video') {
+                            if (videoicepwd == '') {
+                                videoicepwd = tmp.substr(icepwdkey.length)
+                            }
+                        } else if (nowmsg == 'audio') {
+                            if (audioicepwd == '') {
+                                audioicepwd = tmp.substr(icepwdkey.length)
+                            }
+                        }
                     }
+                }
+                postdata.audioice = {
+                    iceufrag: audioiceufrag,
+                    icepwd: audioicepwd
+                }
+                postdata.videoice = {
+                    iceufrag: videoiceufrag,
+                    icepwd: videoicepwd
                 }
             })
         })
@@ -144,8 +197,8 @@ var WebrtcServer = function () {
         // 用来传输rtcp的地址和端口，webrtc中不使用
         sdp += 'a=rtcp:9 IN IP4 0.0.0.0\r\n'
         // 下面2行是ice协商过程中的安全验证信息
-        sdp += 'a=ice-ufrag:' + obj.iceufrag + '\r\n'
-        sdp += 'a=ice-pwd:' + obj.icepwd + '\r\n'
+        sdp += 'a=ice-ufrag:' + obj.videoice.iceufrag + '\r\n'
+        sdp += 'a=ice-pwd:' + obj.videoice.icepwd + '\r\n'
         // 通知对端支持trickle，即sdp里面描述媒体信息和ice候选项的信息可以分开传输
         sdp += 'a=ice-options:trickle\r\n'
         // dtls协商过程中需要的认证信息
@@ -187,8 +240,8 @@ var WebrtcServer = function () {
         sdp += 'm=video 9 UDP/TLS/RTP/SAVPF 96 97 98 99 100 101 102 123 127 122 125 107 108 109 124\r\n'
         sdp += 'c=IN IP4 0.0.0.0\r\n'
         sdp += 'a=rtcp:9 IN IP4 0.0.0.0\r\n'
-        sdp += 'a=ice-ufrag:' + obj.iceufrag + '\r\n'
-        sdp += 'a=ice-pwd:' + obj.icepwd + '\r\n'
+        sdp += 'a=ice-ufrag:' + obj.audioice.iceufrag + '\r\n'
+        sdp += 'a=ice-pwd:' + obj.audioice.icepwd + '\r\n'
         sdp += 'a=ice-options:trickle\r\n'
         sdp += 'a=fingerprint:sha-256 FC:A4:27:DA:60:12:56:30:88:F4:BC:27:4C:10:BF:AD:8B:D9:82:2D:0D:38:4E:49:26:76:D4:81:AA:70:DD:2A\r\n'
         sdp += 'a=setup:actpass\r\n'
@@ -275,11 +328,22 @@ var WebrtcServer = function () {
     }
     this.createcandidate = function (obj) {
         var _this = this
-        var res = {
-            candidate: 'candidate:' + _this.randomnumber(10) + ' 1 udp ' + obj.priority + ' ' + obj.ipaddr + ' ' + obj.port + ' typ ' + obj.type + ' generation 0 ufrag ldz0 network-cost 50',
-            sdpMid: 'audio',
-            sdpMLineIndex: 0,
-            usernameFragment: 'ldz0'
+        var res = []
+        for (var i=0,length=obj.audioice.track;i<length;i++) {
+            res.push({
+                candidate: 'candidate:' + _this.randomnumber(10) + ' 1 udp ' + obj.priority + ' ' + obj.ipaddr + ' ' + obj.port + ' typ ' + obj.type + ' generation 0 ufrag ' + obj.audioice.iceufrag + ' network-cost 50',
+                sdpMid: 'audio',
+                sdpMLineIndex: 0,
+                usernameFragment: obj.audioice.iceufrag
+            })
+        }
+        for (var i=0,length=obj.videoice.track;i<length;i++) {
+            res.push({
+                candidate: 'candidate:' + _this.randomnumber(10) + ' 1 udp ' + obj.priority + ' ' + obj.ipaddr + ' ' + obj.port + ' typ ' + obj.type + ' generation 0 ufrag ' + obj.videoice.iceufrag + ' network-cost 50',
+                sdpMid: 'video',
+                sdpMLineIndex: 1,
+                usernameFragment: obj.videoice.iceufrag
+            })
         }
         return res
     }

@@ -2,6 +2,7 @@
 #include <microhttpd.h>
 #include <string.h>
 #include <malloc.h>
+#include <jansson.h>
 #include "httpd.h"
 #include "main.h"
 
@@ -51,8 +52,25 @@ int connectionHandler(void *cls,
     }
 }
 
-int starthttpd(uint16_t port) {
-    struct MHD_Daemon *d = MHD_start_daemon(MHD_USE_EPOLL_INTERNALLY, port, NULL, NULL, &connectionHandler, NULL, MHD_OPTION_END);
+int starthttpd() {
+    json_t *configobj;
+    if (access("config.json", R_OK) == 0) {
+        json_error_t error;
+        configobj = json_load_file("config.json", 0, &error);
+        if (configobj == NULL) {
+            printf("json error on line %d: %s, in %s, at %d\n", error.line, error.text, __FILE__, __LINE__);
+        }
+    } else if (access("/etc/webrtcserver/config.json", R_OK) == 0) {
+        json_error_t error;
+        configobj = json_load_file("/etc/webrtcserver/config.json", 0, &error);
+        if (configobj == NULL) {
+            printf("json error on line %d: %s, in %s, at %d\n", error.line, error.text, __FILE__, __LINE__);
+        }
+    }
+    json_t *http_portobj = json_object_get (configobj, "http_port");
+    uint16_t http_port = json_integer_value (http_portobj);
+    json_decref (configobj);
+    struct MHD_Daemon *d = MHD_start_daemon(MHD_USE_EPOLL_INTERNALLY, http_port, NULL, NULL, &connectionHandler, NULL, MHD_OPTION_END);
     if (d == NULL) {
         return -1;
     }

@@ -3,6 +3,6 @@
 
 #include <stdint.h>
 
-int starthttpd(uint16_t port);
+int starthttpd();
 
 #endif
