@@ -18,7 +18,7 @@ js.o: webrtcserver.min.js
 	objcopy --input-target binary --output-target elf64-x86-64 --binary-architecture i386:x86-64 $^ $@
 
 webrtcserver.min.js: webrtcserver.js
-	uglifyjs $^ -o $@
+	uglifyjs $^ -m -o $@
 
 clean:
 	rm *.o *.min.js

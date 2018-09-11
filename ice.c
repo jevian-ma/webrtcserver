@@ -8,6 +8,7 @@
 #include "secmalloc.h"
 
 const gchar *candidate_type_name[] = {"host", "srflx", "prflx", "relay"};
+const gchar *state_name[] = {"disconnected", "gathering", "connecting", "connected", "ready", "failed"};
 GMainLoop *gloop;
 NiceAgent *agent;
 
@@ -165,15 +166,25 @@ end2:
 }
 
 void cb_new_selected_pair (NiceAgent *agent, guint stream_id, guint component_id, gchar *lfoundation, gchar *rfoundation, gpointer data) {
-    printf("this is cb_new_selected_pair function, in %s, at %d\n", __FILE__, __LINE__);
+    printf("new selected pair %s %s, in %s, at %d\n", lfoundation, rfoundation, __FILE__, __LINE__);
 }
 
 void cb_component_state_changed (NiceAgent *agent, guint stream_id, guint component_id, guint state, gpointer data) {
-    printf("this is cb_component_state_changed function, in %s, at %d\n", __FILE__, __LINE__);
+    if (state == NICE_COMPONENT_STATE_CONNECTED) {
+        NiceCandidate *local, *remote;
+        if (nice_agent_get_selected_pair (agent, stream_id, component_id, &local, &remote)) {
+            gchar ipaddr[INET6_ADDRSTRLEN];
+            printf("stream:%d NICE_COMPONENT_STATE_CONNECTED\n", stream_id);
+            nice_address_to_string(&local->addr, ipaddr);
+            printf("local address %s:%d,", ipaddr, nice_address_get_port(&local->addr));
+            nice_address_to_string(&remote->addr, ipaddr);
+            printf("remote address %s:%d)\n", ipaddr, nice_address_get_port(&remote->addr));
+        }
+    }
 }
 
 void cb_nice_recv (NiceAgent *agent, guint stream_id, guint component_id, guint len, gchar *buf, gpointer data) {
-    printf("this is cb_nice_recv function, in %s, at %d\n", __FILE__, __LINE__);
+    printf("this is cb_nice_recv function %.*s, in %s, at %d\n", len, buf, __FILE__, __LINE__);
 }
 
 void createliveroom (json_t *obj, char *res) {
@@ -304,23 +315,8 @@ void createliveroom (json_t *obj, char *res) {
 }
 
 void createicd () {
-    json_t *configobj;
-    if (access("config.json", R_OK) == 0) {
-        json_error_t error;
-        configobj = json_load_file("config.json", 0, &error);
-        if (configobj == NULL) {
-            printf("json error on line %d: %s, in %s, at %d\n", error.line, error.text, __FILE__, __LINE__);
-        }
-    } else if (access("/etc/webrtcserver/config.json", R_OK) == 0) {
-        json_error_t error;
-        configobj = json_load_file("/etc/webrtcserver/config.json", 0, &error);
-        if (configobj == NULL) {
-            printf("json error on line %d: %s, in %s, at %d\n", error.line, error.text, __FILE__, __LINE__);           
-        }
-    }
     gloop = g_main_loop_new(NULL, FALSE);
     agent = nice_agent_new(g_main_loop_get_context (gloop), NICE_COMPATIBILITY_RFC5245);
-    json_decref (configobj);
     g_signal_connect(agent, "candidate-gathering-done", G_CALLBACK(cb_candidate_gathering_done), NULL);
     g_signal_connect(agent, "new-selected-pair", G_CALLBACK(cb_new_selected_pair), NULL);
     g_signal_connect(agent, "component-state-changed", G_CALLBACK(cb_component_state_changed), NULL);
