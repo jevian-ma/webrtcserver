@@ -1,5 +1,6 @@
+webrtcserver
 *.o
-webrtcserver*
+*.min.js
 .vscode
 config.json
 
