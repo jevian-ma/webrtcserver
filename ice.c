@@ -6,6 +6,7 @@
 #include <semaphore.h>
 #include <jansson.h>
 #include "secmalloc.h"
+#include "rtp.h"
 
 const gchar *candidate_type_name[] = {"host", "srflx", "prflx", "relay"};
 const gchar *state_name[] = {"disconnected", "gathering", "connecting", "connected", "ready", "failed"};
@@ -93,7 +94,7 @@ void cb_candidate_gathering_done (NiceAgent *agent, guint stream_id, gpointer da
         json_array_append_new(arr, tmp);
         item = item->next;
     }
-    json_object_set_new(stream->res, "track", arr);
+    json_object_set_new(stream->res, "tracks", arr);
 end1:
     if (local_ufrag != NULL) {
         g_free(local_ufrag);
@@ -178,13 +179,19 @@ void cb_component_state_changed (NiceAgent *agent, guint stream_id, guint compon
             nice_address_to_string(&local->addr, ipaddr);
             printf("local address %s:%d,", ipaddr, nice_address_get_port(&local->addr));
             nice_address_to_string(&remote->addr, ipaddr);
-            printf("remote address %s:%d)\n", ipaddr, nice_address_get_port(&remote->addr));
+            printf("remote address %s:%d\n", ipaddr, nice_address_get_port(&remote->addr));
         }
     }
 }
 
 void cb_nice_recv (NiceAgent *agent, guint stream_id, guint component_id, guint len, gchar *buf, gpointer data) {
-    printf("this is cb_nice_recv function %.*s, in %s, at %d\n", len, buf, __FILE__, __LINE__);
+    if (is_dtls(buf)) {
+        printf("is dtls, in %s, at %d\n", __FILE__, __LINE__);
+    } else if (is_rtp(buf)) {
+        printf("is rtp, in %s, at %d\n", __FILE__, __LINE__);
+    } else if (is_rtcp(buf)) {
+        printf("is rtcp, in %s, at %d\n", __FILE__, __LINE__);
+    }
 }
 
 void createliveroom (json_t *obj, char *res) {

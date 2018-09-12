@@ -1,5 +1,5 @@
 
-webrtcserver: main.o httpd.o secmalloc.o ice.o js.o
+webrtcserver: main.o httpd.o secmalloc.o ice.o js.o rtp.o
 	gcc -o $@ $^ -lmicrohttpd -ljansson `pkg-config --cflags --libs nice`
 
 main.o: main.c httpd.h ice.h
@@ -11,8 +11,11 @@ httpd.o: httpd.c httpd.h main.h
 secmalloc.o: secmalloc.c secmalloc.h
 	gcc -c -o $@ secmalloc.c
 
-ice.o: ice.c secmalloc.h
+ice.o: ice.c secmalloc.h rtp.h
 	gcc -c -o $@ ice.c `pkg-config --cflags --libs nice`
+
+rtp.o: rtp.c rtp.h
+	gcc -c -o $@ rtp.c
 
 js.o: webrtcserver.min.js
 	objcopy --input-target binary --output-target elf64-x86-64 --binary-architecture i386:x86-64 $^ $@
